@@ -219,85 +219,182 @@ function start_app {
   echo -e "${YELLOW}Pulling latest Docker images...${NC}"
   $COMPOSE_CMD pull
   
+  # Function to handle port conflicts by modifying docker-compose.yml
+  function handle_port_conflict {
+    local error_message=$1
+    local service_name=$2
+    local default_port=$3
+    
+    # Extract the port that's in conflict from the error message
+    if [[ $error_message =~ "exposing port TCP 0.0.0.0:$default_port" ]]; then
+      echo -e "${YELLOW}Port $default_port is already in use.${NC}"
+      
+      # Find an available port
+      local new_port=$((default_port + 1))
+      while netstat -tuln | grep -q ":$new_port "; do
+        ((new_port++))
+      done
+      
+      echo -e "${YELLOW}Changing $service_name port from $default_port to $new_port in docker-compose.yml${NC}"
+      
+      # Update docker-compose.yml
+      sed -i "s/- \"$default_port:$default_port\"/- \"$new_port:$default_port\"/g" docker-compose.yml
+      
+      # Export the new port for later use
+      case "$service_name" in
+        "db")
+          export TRIS_PG_PORT=$new_port
+          ;;
+        "redis")
+          export TRIS_REDIS_PORT=$new_port
+          ;;
+        "frontend")
+          export TRIS_FRONTEND_PORT=$new_port
+          ;;
+        "backend")
+          export TRIS_BACKEND_PORT=$new_port
+          ;;
+      esac
+      
+      return 0
+    fi
+    
+    return 1
+  }
+  
   # Start the database and redis first
   echo -e "${YELLOW}Starting database and redis...${NC}"
-  $COMPOSE_CMD up -d db redis
   
-  # Wait for database to be healthy
-  echo -e "${YELLOW}Waiting for database to be ready...${NC}"
-  local max_attempts=30
-  local attempt=1
-  local db_ready=false
+  # Try to start the services, handling port conflicts if they occur
+  db_started=false
+  redis_started=false
+  retry_attempts=0
+  max_retries=5
   
-  while [ $attempt -le $max_attempts ]; do
-    if $COMPOSE_CMD ps db | grep -q "healthy"; then
-      db_ready=true
-      echo -e "${GREEN}Database is ready!${NC}"
-      break
-    fi
+  while ([ "$db_started" = false ] || [ "$redis_started" = false ]) && [ $retry_attempts -lt $max_retries ]; do
+    # Start the services
+    error_output=$($COMPOSE_CMD up -d db redis 2>&1)
     
-    echo -n "."
-    sleep 2
-    ((attempt++))
-  done
-  
-  if [ "$db_ready" = false ]; then
-    echo -e "\n${RED}Database failed to start properly. Checking logs:${NC}"
-    $COMPOSE_CMD logs db
-    echo -e "\n${YELLOW}Attempting to fix common database issues...${NC}"
-    
-    # Try to fix common issues
-    echo -e "Removing database volume and recreating..."
-    $COMPOSE_CMD down
-    docker volume rm tris-docker_postgres_data || true
-    
-    # Start again
-    echo -e "${YELLOW}Restarting containers...${NC}"
-    $COMPOSE_CMD up -d db redis
-    
-    # Wait again for database
-    echo -e "${YELLOW}Waiting for database to be ready (second attempt)...${NC}"
-    attempt=1
-    while [ $attempt -le $max_attempts ]; do
-      if $COMPOSE_CMD ps db | grep -q "healthy"; then
-        db_ready=true
-        echo -e "${GREEN}Database is ready!${NC}"
-        break
+    # Check for port conflicts
+    if echo "$error_output" | grep -q "Ports are not available"; then
+      echo -e "${YELLOW}Port conflict detected. Attempting to resolve...${NC}"
+      
+      # Try to handle port conflicts for each service
+      if echo "$error_output" | grep -q "exposing port TCP 0.0.0.0:5432"; then
+        handle_port_conflict "$error_output" "db" 5432
       fi
       
-      echo -n "."
+      if echo "$error_output" | grep -q "exposing port TCP 0.0.0.0:6379"; then
+        handle_port_conflict "$error_output" "redis" 6379
+      fi
+      
+      # Increment retry counter
+      ((retry_attempts++))
+      
+      # If we've tried too many times, exit
+      if [ $retry_attempts -ge $max_retries ]; then
+        echo -e "${RED}Failed to start services after $max_retries attempts. Please check your system for conflicting services.${NC}"
+        exit 1
+      fi
+      
+      echo -e "${YELLOW}Retrying with new ports...${NC}"
       sleep 2
-      ((attempt++))
-    done
-    
-    if [ "$db_ready" = false ]; then
-      echo -e "\n${RED}Database failed to start after multiple attempts.${NC}"
-      echo -e "Please check your Docker installation and PostgreSQL configuration."
-      exit 1
+    else
+      # No port conflicts, services started successfully
+      db_started=true
+      redis_started=true
     fi
-  fi
+  done
+  
+  # Wait for the database to be ready
+  echo -e "${YELLOW}Waiting for database to be ready...${NC}"
+  db_ready=false
+  retry_count=0
+  max_retries=30
+  
+  while [ "$db_ready" = false ] && [ $retry_count -lt $max_retries ]; do
+    sleep 1
+    echo -n "."
+    
+    # Check if the database container is running and healthy
+    if $COMPOSE_CMD ps db | grep -q "(healthy)"; then
+      db_ready=true
+      echo -e "\n${GREEN}Database is ready!${NC}"
+    elif $COMPOSE_CMD ps db | grep -q "(unhealthy)"; then
+      echo -e "\n${RED}Database is unhealthy. Checking logs...${NC}"
+      $COMPOSE_CMD logs db
+      
+      echo -e "${YELLOW}Attempting to fix database issues...${NC}"
+      $COMPOSE_CMD down
+      docker volume rm tris-docker_postgres_data 2>/dev/null || true
+      $COMPOSE_CMD up -d db
+      sleep 5
+    fi
+    
+    ((retry_count++))
+  done
   
   # Start the backend and frontend
   echo -e "${YELLOW}Starting backend and frontend...${NC}"
-  $COMPOSE_CMD up -d backend frontend
   
-  # Check if all services are running
-  if $COMPOSE_CMD ps | grep -q "Exit"; then
-    echo -e "${RED}Some containers failed to start. Checking logs:${NC}"
-    $COMPOSE_CMD logs
-    echo -e "${RED}Failed to start Tic-Tac-Toe application.${NC}"
-    exit 1
-  else
-    echo -e "${GREEN}Tic-Tac-Toe application started successfully!${NC}"
-    echo -e "Access the frontend at ${GREEN}http://localhost:3000${NC}"
-    echo -e "Access the backend API at ${GREEN}http://localhost:4000${NC}"
+  # Try to start the services, handling port conflicts if they occur
+  backend_started=false
+  frontend_started=false
+  retry_attempts=0
+  max_retries=5
+  
+  while ([ "$backend_started" = false ] || [ "$frontend_started" = false ]) && [ $retry_attempts -lt $max_retries ]; do
+    # Start the services
+    error_output=$($COMPOSE_CMD up -d backend frontend 2>&1)
     
-    # If show_logs is true, display logs
-    if [ "$1" = "true" ]; then
-      echo -e "\n${YELLOW}Showing application logs:${NC}"
-      echo -e "Press ${YELLOW}Ctrl+C${NC} to exit logs (application will continue running)\n"
-      $COMPOSE_CMD logs -f
+    # Check for port conflicts
+    if echo "$error_output" | grep -q "Ports are not available"; then
+      echo -e "${YELLOW}Port conflict detected. Attempting to resolve...${NC}"
+      
+      # Try to handle port conflicts for each service
+      if echo "$error_output" | grep -q "exposing port TCP 0.0.0.0:4000"; then
+        handle_port_conflict "$error_output" "backend" 4000
+      fi
+      
+      if echo "$error_output" | grep -q "exposing port TCP 0.0.0.0:3000"; then
+        handle_port_conflict "$error_output" "frontend" 3000
+      fi
+      
+      # Increment retry counter
+      ((retry_attempts++))
+      
+      # If we've tried too many times, exit
+      if [ $retry_attempts -ge $max_retries ]; then
+        echo -e "${RED}Failed to start services after $max_retries attempts. Please check your system for conflicting services.${NC}"
+        exit 1
+      fi
+      
+      echo -e "${YELLOW}Retrying with new ports...${NC}"
+      sleep 2
+    else
+      # No port conflicts, services started successfully
+      backend_started=true
+      frontend_started=true
     fi
+  done
+  
+  # Final check to ensure all services are running
+  echo -e "${YELLOW}Checking if all services are running...${NC}"
+  if $COMPOSE_CMD ps | grep -q "Exit"; then
+    echo -e "${RED}Some services failed to start. Checking logs...${NC}"
+    $COMPOSE_CMD logs
+    exit 1
+  fi
+  
+  echo -e "${GREEN}Tic-Tac-Toe application started successfully!${NC}"
+  echo -e "Access the frontend at ${GREEN}http://localhost:${TRIS_FRONTEND_PORT:-3000}${NC}"
+  echo -e "Access the backend API at ${GREEN}http://localhost:${TRIS_BACKEND_PORT:-4000}${NC}"
+  
+  # If show_logs is true, display logs
+  if [ "$1" = "true" ]; then
+    echo -e "\n${YELLOW}Showing application logs:${NC}"
+    echo -e "Press ${YELLOW}Ctrl+C${NC} to exit logs (application will continue running)\n"
+    $COMPOSE_CMD logs -f
   fi
 }
 
