@@ -161,12 +161,45 @@ function remove_existing_containers {
   echo -e "${GREEN}Container cleanup complete.${NC}"
 }
 
+# Function to check if ports are available
+function check_ports {
+  local port=$1
+  local service=$2
+  
+  # Check if the port is in use
+  if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null ; then
+    echo -e "${RED}Error: Port $port is already in use by another service.${NC}"
+    echo -e "This port is needed for the $service service."
+    
+    # Try to identify what's using the port
+    echo -e "${YELLOW}Checking what's using port $port:${NC}"
+    lsof -i :$port
+    
+    echo -e "\n${YELLOW}Options:${NC}"
+    echo -e "1. Stop the conflicting service and try again"
+    echo -e "2. Modify docker-compose.yml to use a different port"
+    
+    return 1
+  fi
+  
+  return 0
+}
+
 # Function to start the application
 function start_app {
   echo -e "${YELLOW}Starting Tic-Tac-Toe application...${NC}"
   
   # Remove existing containers first
   remove_existing_containers
+  
+  # Check if required ports are available
+  echo -e "${YELLOW}Checking if required ports are available...${NC}"
+  check_ports 5432 "PostgreSQL database" || { echo -e "${RED}Please fix the port conflict for PostgreSQL (5432) before continuing.${NC}"; exit 1; }
+  check_ports 6379 "Redis" || { echo -e "${RED}Please fix the port conflict for Redis (6379) before continuing.${NC}"; exit 1; }
+  check_ports 3000 "Frontend" || { echo -e "${RED}Please fix the port conflict for Frontend (3000) before continuing.${NC}"; exit 1; }
+  check_ports 4000 "Backend API" || { echo -e "${RED}Please fix the port conflict for Backend API (4000) before continuing.${NC}"; exit 1; }
+  
+  echo -e "${GREEN}All required ports are available.${NC}"
   
   # Pull latest images
   echo -e "${YELLOW}Pulling latest Docker images...${NC}"
@@ -320,6 +353,70 @@ function access_db {
   $COMPOSE_CMD exec db psql -U postgres -d tris_game
 }
 
+# Function to modify docker-compose ports
+function modify_compose_ports {
+  echo -e "${YELLOW}Checking for port conflicts and modifying docker-compose.yml if needed...${NC}"
+  
+  # Get available ports
+  local pg_port=5432
+  local redis_port=6379
+  local frontend_port=3000
+  local backend_port=4000
+  
+  # Check if ports are in use and find alternatives
+  if lsof -Pi :$pg_port -sTCP:LISTEN -t >/dev/null ; then
+    local new_pg_port=5433
+    while lsof -Pi :$new_pg_port -sTCP:LISTEN -t >/dev/null ; do
+      ((new_pg_port++))
+    done
+    echo -e "${YELLOW}PostgreSQL port $pg_port is in use. Using port $new_pg_port instead.${NC}"
+    sed -i "s/- \"$pg_port:$pg_port\"/- \"$new_pg_port:$pg_port\"/g" docker-compose.yml
+    pg_port=$new_pg_port
+  fi
+  
+  if lsof -Pi :$redis_port -sTCP:LISTEN -t >/dev/null ; then
+    local new_redis_port=6380
+    while lsof -Pi :$new_redis_port -sTCP:LISTEN -t >/dev/null ; do
+      ((new_redis_port++))
+    done
+    echo -e "${YELLOW}Redis port $redis_port is in use. Using port $new_redis_port instead.${NC}"
+    sed -i "s/- \"$redis_port:$redis_port\"/- \"$new_redis_port:$redis_port\"/g" docker-compose.yml
+    redis_port=$new_redis_port
+  fi
+  
+  if lsof -Pi :$frontend_port -sTCP:LISTEN -t >/dev/null ; then
+    local new_frontend_port=3001
+    while lsof -Pi :$new_frontend_port -sTCP:LISTEN -t >/dev/null ; do
+      ((new_frontend_port++))
+    done
+    echo -e "${YELLOW}Frontend port $frontend_port is in use. Using port $new_frontend_port instead.${NC}"
+    sed -i "s/- \"$frontend_port:$frontend_port\"/- \"$new_frontend_port:$frontend_port\"/g" docker-compose.yml
+    frontend_port=$new_frontend_port
+  fi
+  
+  if lsof -Pi :$backend_port -sTCP:LISTEN -t >/dev/null ; then
+    local new_backend_port=4001
+    while lsof -Pi :$new_backend_port -sTCP:LISTEN -t >/dev/null ; do
+      ((new_backend_port++))
+    done
+    echo -e "${YELLOW}Backend port $backend_port is in use. Using port $new_backend_port instead.${NC}"
+    sed -i "s/- \"$backend_port:$backend_port\"/- \"$new_backend_port:$backend_port\"/g" docker-compose.yml
+    backend_port=$new_backend_port
+  fi
+  
+  echo -e "${GREEN}Docker Compose configuration updated with available ports:${NC}"
+  echo -e "  - PostgreSQL: ${GREEN}$pg_port${NC}"
+  echo -e "  - Redis: ${GREEN}$redis_port${NC}"
+  echo -e "  - Frontend: ${GREEN}$frontend_port${NC}"
+  echo -e "  - Backend API: ${GREEN}$backend_port${NC}"
+  
+  # Save the ports for later use
+  export TRIS_PG_PORT=$pg_port
+  export TRIS_REDIS_PORT=$redis_port
+  export TRIS_FRONTEND_PORT=$frontend_port
+  export TRIS_BACKEND_PORT=$backend_port
+}
+
 # Function to reset the application database
 function reset_app {
   echo -e "${RED}Warning: This will delete all data in the database.${NC}"
@@ -342,13 +439,16 @@ function reset_app {
   docker volume rm tris-docker_postgres_data 2>/dev/null || true
   docker volume rm tris-docker_redis_data 2>/dev/null || true
   
+  # Check for port conflicts and modify docker-compose if needed
+  modify_compose_ports
+  
   # Start the application again using our start function
   echo -e "Starting application with fresh database..."
   start_app "false"
   
   echo -e "${GREEN}Tic-Tac-Toe application database reset successfully!${NC}"
-  echo -e "Access the frontend at ${GREEN}http://localhost:3000${NC}"
-  echo -e "Access the backend API at ${GREEN}http://localhost:4000${NC}"
+  echo -e "Access the frontend at ${GREEN}http://localhost:${TRIS_FRONTEND_PORT:-3000}${NC}"
+  echo -e "Access the backend API at ${GREEN}http://localhost:${TRIS_BACKEND_PORT:-4000}${NC}"
 }
 
 # Check if Docker is running
@@ -356,6 +456,9 @@ check_docker
 
 # Check for docker-compose availability
 check_compose
+
+# Add the function to modify docker-compose ports before processing commands
+modify_compose_ports
 
 # Process command line arguments
 if [ $# -eq 0 ]; then
