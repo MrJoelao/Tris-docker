@@ -572,8 +572,6 @@ function reset_app {
   start_app "false"
   
   echo -e "${GREEN}Tic-Tac-Toe application database reset successfully!${NC}"
-  echo -e "Access the frontend at ${GREEN}http://localhost:${TRIS_FRONTEND_PORT:-3000}${NC}"
-  echo -e "Access the backend API at ${GREEN}http://localhost:${TRIS_BACKEND_PORT:-4000}${NC}"
 }
 
 # Check if Docker is running

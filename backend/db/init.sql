@@ -1,8 +1,8 @@
 -- Create database if it doesn't exist
-CREATE DATABASE tris_game;
+CREATE DATABASE tris_db;
 
 -- Connect to the database
-\c tris_game;
+\c tris_db;
 
 -- Create enum types
 CREATE TYPE game_status AS ENUM ('waiting', 'in_progress', 'completed', 'abandoned');

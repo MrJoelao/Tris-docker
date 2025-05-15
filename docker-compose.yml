@@ -5,9 +5,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     depends_on:
       - backend
     environment:
@@ -33,14 +30,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - /app/node_modules
     environment:
       - NODE_ENV=development
       - DATABASE_HOST=db
       - DATABASE_PORT=5432
-      - DATABASE_NAME=tris_game
+      - DATABASE_NAME=tris_db
       - DATABASE_USER=postgres
       - DATABASE_PASSWORD=postgres
       - REDIS_HOST=redis
@@ -66,7 +60,7 @@ services:
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=tris_game
+      - POSTGRES_DB=tris_db
     restart: unless-stopped
     networks:
       - game-network

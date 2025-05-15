@@ -5,14 +5,14 @@ WORKDIR /app
 # Copy package files first for better caching
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies with clean install
+RUN npm install
+
+# Explicitly install the missing dependencies
+RUN npm install framer-motion react-hook-form
 
 # Copy the rest of the application code
 COPY . .
-
-# Build the application for production
-RUN npm run build
 
 # Expose the port the app runs on
 EXPOSE 3000
