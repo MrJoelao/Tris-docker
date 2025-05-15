@@ -34,8 +34,10 @@ function check_docker {
     # Use sudo for all docker commands if that's what works
     if ! docker info > /dev/null 2>&1; then
       echo -e "${YELLOW}Note: Docker requires sudo privileges on this system.${NC}"
-      alias docker="sudo docker"
-      # Make sure the alias is available in functions
+      # Use a wrapper function instead of an alias
+      docker() {
+        sudo docker "$@"
+      }
       export -f docker
     fi
     return 0
@@ -161,10 +163,22 @@ function remove_existing_containers {
   echo -e "${GREEN}Container cleanup complete.${NC}"
 }
 
+# Function to check if a command exists
+function command_exists {
+  command -v "$1" >/dev/null 2>&1
+}
+
 # Function to check if ports are available
 function check_ports {
   local port=$1
   local service=$2
+  
+  # Check if lsof is available
+  if ! command_exists lsof; then
+    echo -e "${YELLOW}Warning: 'lsof' command not found. Cannot check if ports are in use.${NC}"
+    echo -e "${YELLOW}Assuming port $port is available for $service.${NC}"
+    return 0
+  fi
   
   # Check if the port is in use
   if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null ; then
@@ -363,6 +377,20 @@ function modify_compose_ports {
   local frontend_port=3000
   local backend_port=4000
   
+  # Check if lsof is available
+  if ! command_exists lsof; then
+    echo -e "${YELLOW}Warning: 'lsof' command not found. Cannot check if ports are in use.${NC}"
+    echo -e "${YELLOW}Using default ports: PostgreSQL ($pg_port), Redis ($redis_port), Frontend ($frontend_port), Backend ($backend_port)${NC}"
+    
+    # Save the ports for later use
+    export TRIS_PG_PORT=$pg_port
+    export TRIS_REDIS_PORT=$redis_port
+    export TRIS_FRONTEND_PORT=$frontend_port
+    export TRIS_BACKEND_PORT=$backend_port
+    
+    return 0
+  fi
+  
   # Check if ports are in use and find alternatives
   if lsof -Pi :$pg_port -sTCP:LISTEN -t >/dev/null ; then
     local new_pg_port=5433
@@ -456,6 +484,32 @@ check_docker
 
 # Check for docker-compose availability
 check_compose
+
+# Check if we need to install lsof
+if ! command_exists lsof; then
+  echo -e "${YELLOW}The 'lsof' command is not installed. This is used to check for port conflicts.${NC}"
+  echo -e "${YELLOW}Would you like to install it? (y/n): ${NC}"
+  read -r install_lsof
+  
+  if [[ $install_lsof == "y" || $install_lsof == "Y" ]]; then
+    echo -e "${YELLOW}Installing lsof...${NC}"
+    if command_exists apt-get; then
+      sudo apt-get update && sudo apt-get install -y lsof
+    elif command_exists yum; then
+      sudo yum install -y lsof
+    elif command_exists dnf; then
+      sudo dnf install -y lsof
+    elif command_exists pacman; then
+      sudo pacman -S --noconfirm lsof
+    elif command_exists brew; then
+      brew install lsof
+    else
+      echo -e "${RED}Could not determine package manager. Please install lsof manually.${NC}"
+    fi
+  else
+    echo -e "${YELLOW}Continuing without lsof. Port conflict detection will be disabled.${NC}"
+  fi
+fi
 
 # Add the function to modify docker-compose ports before processing commands
 modify_compose_ports
