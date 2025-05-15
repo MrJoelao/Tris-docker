@@ -139,28 +139,23 @@ function check_compose {
 function remove_existing_containers {
   echo -e "${YELLOW}Checking for existing containers...${NC}"
   
-  # Check if frontend container exists
-  if docker ps -a --format '{{.Names}}' | grep -q "^tris-docker_frontend"; then
-    echo -e "Found existing container ${YELLOW}tris-docker_frontend${NC}, removing it..."
-    docker rm -f tris-docker_frontend > /dev/null 2>&1
-  fi
+  # Get all containers related to our application
+  local containers=$(docker ps -a --format '{{.Names}}' | grep 'tris-docker')
   
-  # Check if backend container exists
-  if docker ps -a --format '{{.Names}}' | grep -q "^tris-docker_backend"; then
-    echo -e "Found existing container ${YELLOW}tris-docker_backend${NC}, removing it..."
-    docker rm -f tris-docker_backend > /dev/null 2>&1
-  fi
-  
-  # Check if db container exists
-  if docker ps -a --format '{{.Names}}' | grep -q "^tris-docker_db"; then
-    echo -e "Found existing container ${YELLOW}tris-docker_db${NC}, removing it..."
-    docker rm -f tris-docker_db > /dev/null 2>&1
-  fi
-  
-  # Check if redis container exists
-  if docker ps -a --format '{{.Names}}' | grep -q "^tris-docker_redis"; then
-    echo -e "Found existing container ${YELLOW}tris-docker_redis${NC}, removing it..."
-    docker rm -f tris-docker_redis > /dev/null 2>&1
+  if [ -n "$containers" ]; then
+    echo -e "Found existing containers, removing them..."
+    
+    # Stop all running containers first
+    echo -e "Stopping running containers..."
+    $COMPOSE_CMD down --remove-orphans
+    
+    # Force remove any remaining containers
+    for container in $containers; do
+      echo -e "Removing container ${YELLOW}$container${NC}"
+      docker rm -f $container > /dev/null 2>&1
+    done
+  else
+    echo -e "No existing containers found."
   fi
   
   echo -e "${GREEN}Container cleanup complete.${NC}"
@@ -173,10 +168,79 @@ function start_app {
   # Remove existing containers first
   remove_existing_containers
   
-  # Start the application
-  $COMPOSE_CMD up -d
+  # Pull latest images
+  echo -e "${YELLOW}Pulling latest Docker images...${NC}"
+  $COMPOSE_CMD pull
   
-  if [ $? -eq 0 ]; then
+  # Start the database and redis first
+  echo -e "${YELLOW}Starting database and redis...${NC}"
+  $COMPOSE_CMD up -d db redis
+  
+  # Wait for database to be healthy
+  echo -e "${YELLOW}Waiting for database to be ready...${NC}"
+  local max_attempts=30
+  local attempt=1
+  local db_ready=false
+  
+  while [ $attempt -le $max_attempts ]; do
+    if $COMPOSE_CMD ps db | grep -q "healthy"; then
+      db_ready=true
+      echo -e "${GREEN}Database is ready!${NC}"
+      break
+    fi
+    
+    echo -n "."
+    sleep 2
+    ((attempt++))
+  done
+  
+  if [ "$db_ready" = false ]; then
+    echo -e "\n${RED}Database failed to start properly. Checking logs:${NC}"
+    $COMPOSE_CMD logs db
+    echo -e "\n${YELLOW}Attempting to fix common database issues...${NC}"
+    
+    # Try to fix common issues
+    echo -e "Removing database volume and recreating..."
+    $COMPOSE_CMD down
+    docker volume rm tris-docker_postgres_data || true
+    
+    # Start again
+    echo -e "${YELLOW}Restarting containers...${NC}"
+    $COMPOSE_CMD up -d db redis
+    
+    # Wait again for database
+    echo -e "${YELLOW}Waiting for database to be ready (second attempt)...${NC}"
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+      if $COMPOSE_CMD ps db | grep -q "healthy"; then
+        db_ready=true
+        echo -e "${GREEN}Database is ready!${NC}"
+        break
+      fi
+      
+      echo -n "."
+      sleep 2
+      ((attempt++))
+    done
+    
+    if [ "$db_ready" = false ]; then
+      echo -e "\n${RED}Database failed to start after multiple attempts.${NC}"
+      echo -e "Please check your Docker installation and PostgreSQL configuration."
+      exit 1
+    fi
+  fi
+  
+  # Start the backend and frontend
+  echo -e "${YELLOW}Starting backend and frontend...${NC}"
+  $COMPOSE_CMD up -d backend frontend
+  
+  # Check if all services are running
+  if $COMPOSE_CMD ps | grep -q "Exit"; then
+    echo -e "${RED}Some containers failed to start. Checking logs:${NC}"
+    $COMPOSE_CMD logs
+    echo -e "${RED}Failed to start Tic-Tac-Toe application.${NC}"
+    exit 1
+  else
     echo -e "${GREEN}Tic-Tac-Toe application started successfully!${NC}"
     echo -e "Access the frontend at ${GREEN}http://localhost:3000${NC}"
     echo -e "Access the backend API at ${GREEN}http://localhost:4000${NC}"
@@ -187,9 +251,6 @@ function start_app {
       echo -e "Press ${YELLOW}Ctrl+C${NC} to exit logs (application will continue running)\n"
       $COMPOSE_CMD logs -f
     fi
-  else
-    echo -e "${RED}Failed to start Tic-Tac-Toe application.${NC}"
-    exit 1
   fi
 }
 
@@ -274,15 +335,16 @@ function reset_app {
   
   # Stop the application first
   echo -e "Stopping application containers..."
-  $COMPOSE_CMD down
+  $COMPOSE_CMD down --volumes --remove-orphans
   
-  # Remove volume
+  # Make sure the volume is removed
   echo -e "Removing database volume..."
-  docker volume rm tris-docker_postgres_data
+  docker volume rm tris-docker_postgres_data 2>/dev/null || true
+  docker volume rm tris-docker_redis_data 2>/dev/null || true
   
-  # Start the application again
+  # Start the application again using our start function
   echo -e "Starting application with fresh database..."
-  $COMPOSE_CMD up -d
+  start_app "false"
   
   echo -e "${GREEN}Tic-Tac-Toe application database reset successfully!${NC}"
   echo -e "Access the frontend at ${GREEN}http://localhost:3000${NC}"
