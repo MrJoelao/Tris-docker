@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import PlayerProfile from './PlayerProfile.vue';
 
 const props = defineProps({
   socket: Object,
@@ -15,6 +16,8 @@ const isDraw = ref(false);
 const isMyTurn = ref(false);
 const statusMessage = ref('Waiting for opponent...');
 const timeoutInterval = ref(null);
+const lastMove = ref(null);
+const winningCombination = ref([]);
 
 const playerSymbol = computed(() => {
   if (!props.game) return '';
@@ -50,9 +53,13 @@ watch(() => props.game, (newGame) => {
       if (newGame.winnerId === props.playerId) {
         statusMessage.value = 'You won!';
         winner.value = playerSymbol.value;
+        // Calculate winning combination
+        winningCombination.value = calculateWinningCombination(board.value, winner.value);
       } else {
         statusMessage.value = 'You lost!';
         winner.value = opponentSymbol.value;
+        // Calculate winning combination
+        winningCombination.value = calculateWinningCombination(board.value, winner.value);
       }
     } else if (newGame.status === 'draw') {
       statusMessage.value = 'Game ended in a draw!';
@@ -66,12 +73,31 @@ function makeMove(index) {
     return;
   }
 
+  // Set the last move for animation
+  lastMove.value = index;
+
   // Emit the move to the server
   props.socket.emit('makeMove', {
     gameId: props.game.id,
     playerId: props.playerId,
     position: index
   });
+}
+
+function calculateWinningCombination(board, symbol) {
+  const winPatterns = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8], // rows
+    [0, 3, 6], [1, 4, 7], [2, 5, 8], // columns
+    [0, 4, 8], [2, 4, 6]             // diagonals
+  ];
+
+  for (const pattern of winPatterns) {
+    if (pattern.every(index => board[index] === symbol)) {
+      return pattern;
+    }
+  }
+
+  return [];
 }
 
 function checkTimeout() {
@@ -99,16 +125,28 @@ onUnmounted(() => {
       </button>
     </div>
     
-    <div class="mb-4 p-3 bg-white/5 rounded-lg">
-      <p class="text-lg font-medium">{{ statusMessage }}</p>
-      <div class="mt-2 flex justify-between">
-        <div>
-          <span class="font-bold">You:</span> {{ playerSymbol }}
-        </div>
-        <div v-if="game?.player2Id">
-          <span class="font-bold">Opponent:</span> {{ opponentSymbol }}
-        </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <!-- Your profile -->
+      <PlayerProfile 
+        :player-id="playerId" 
+        :symbol="playerSymbol" 
+        :is-current-turn="isMyTurn" 
+      />
+      
+      <!-- Opponent profile (if exists) -->
+      <PlayerProfile 
+        v-if="game?.player2Id" 
+        :player-id="game.player2Id" 
+        :symbol="opponentSymbol" 
+        :is-current-turn="gameStatus === 'in_progress' && !isMyTurn" 
+      />
+      <div v-else class="bg-white/10 backdrop-blur-sm rounded-lg p-4 flex items-center justify-center">
+        <p class="text-center opacity-70">Waiting for opponent to join...</p>
       </div>
+    </div>
+    
+    <div class="mb-4 p-3 bg-white/5 rounded-lg text-center">
+      <p class="text-lg font-medium">{{ statusMessage }}</p>
     </div>
     
     <div class="grid grid-cols-3 gap-3 mb-6">
@@ -116,13 +154,26 @@ onUnmounted(() => {
         v-for="(cell, index) in board" 
         :key="index"
         @click="makeMove(index)"
-        class="aspect-square flex items-center justify-center text-4xl font-bold bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
+        class="aspect-square flex items-center justify-center text-4xl font-bold bg-white/10 hover:bg-white/20 rounded-lg transition-all duration-300"
         :class="{
           'cursor-not-allowed opacity-80': !isMyTurn || cell !== '' || gameStatus !== 'in_progress',
-          'bg-green-400/20': winner && cell === winner,
+          'bg-green-400/20 scale-105': winningCombination.includes(index),
+          'animate-pulse': lastMove === index,
+          'hover:scale-105': cell === '' && isMyTurn && gameStatus === 'in_progress'
         }"
       >
-        {{ cell }}
+        <span 
+          v-if="cell" 
+          class="transform transition-all duration-300"
+          :class="{
+            'scale-0 opacity-0': lastMove === index,
+            'scale-100 opacity-100': lastMove !== index,
+            'text-blue-300': cell === 'X',
+            'text-pink-300': cell === 'O'
+          }"
+        >
+          {{ cell }}
+        </span>
       </button>
     </div>
     
