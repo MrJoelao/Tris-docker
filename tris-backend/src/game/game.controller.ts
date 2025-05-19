@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, HttpException, HttpStatus } from '@nestjs/common';
 import { GameService } from './game.service';
 import { Game } from '../entities/game.entity';
 
@@ -14,6 +14,14 @@ export class GameController {
   @Get()
   async findAllGames(): Promise<Game[]> {
     return this.gameService.findAllGames();
+  }
+  
+  @Get('history')
+  async getGameHistory(@Query('playerId') playerId: string): Promise<Game[]> {
+    if (!playerId) {
+      throw new HttpException('Player ID is required', HttpStatus.BAD_REQUEST);
+    }
+    return this.gameService.getPlayerGameHistory(playerId);
   }
 
   @Get(':id')

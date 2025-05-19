@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import GameBoard from './components/GameBoard.vue';
 import GameLobby from './components/GameLobby.vue';
+import GameHistory from './components/GameHistory.vue';
 import Notification from './components/Notification.vue';
 import { io } from 'socket.io-client';
 
@@ -113,8 +114,12 @@ onMounted(() => {
     </header>
 
     <main class="max-w-4xl mx-auto">
-      <div v-if="currentView === 'lobby'" class="card bg-white/10 backdrop-blur-sm rounded-xl p-6 shadow-xl">
-        <GameLobby :socket="socket" :player-id="playerId" @start-game="startGame" />
+      <div v-if="currentView === 'lobby'" class="space-y-6">
+        <div class="card bg-white/10 backdrop-blur-sm rounded-xl p-6 shadow-xl">
+          <GameLobby :socket="socket" :player-id="playerId" @start-game="startGame" />
+        </div>
+        
+        <GameHistory :player-id="playerId" />
       </div>
       
       <div v-else-if="currentView === 'game'" class="card bg-white/10 backdrop-blur-sm rounded-xl p-6 shadow-xl">

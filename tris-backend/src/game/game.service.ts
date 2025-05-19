@@ -31,6 +31,19 @@ export class GameService {
       order: { createdAt: 'DESC' }
     });
   }
+  
+  async getPlayerGameHistory(playerId: string): Promise<Game[]> {
+    return this.gameRepository.find({
+      where: [
+        { player1Id: playerId, status: GameStatus.COMPLETED },
+        { player2Id: playerId, status: GameStatus.COMPLETED },
+        { player1Id: playerId, status: GameStatus.DRAW },
+        { player2Id: playerId, status: GameStatus.DRAW }
+      ],
+      order: { updatedAt: 'DESC' },
+      take: 10 // Limit to last 10 games
+    });
+  }
 
   async joinGame(gameId: string, playerId: string): Promise<Game> {
     const game = await this.findGame(gameId);
