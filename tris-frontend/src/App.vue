@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import GameBoard from './components/GameBoard.vue';
 import GameLobby from './components/GameLobby.vue';
+import Notification from './components/Notification.vue';
 import { io } from 'socket.io-client';
 
 const socket = io('http://localhost:3000');
@@ -9,6 +10,14 @@ const currentView = ref('lobby'); // 'lobby' or 'game'
 const currentGame = ref(null);
 const playerId = ref(generatePlayerId());
 const isConnected = ref(false);
+
+// Notification state
+const notification = ref({
+  show: false,
+  message: '',
+  type: 'info', // 'success', 'error', 'info'
+  duration: 3000
+});
 
 function generatePlayerId() {
   return 'player_' + Math.random().toString(36).substring(2, 9);
@@ -27,27 +36,67 @@ function returnToLobby() {
   currentGame.value = null;
 }
 
+function showNotification(message, type = 'info', duration = 3000) {
+  notification.value = {
+    show: true,
+    message,
+    type,
+    duration
+  };
+}
+
+function hideNotification() {
+  notification.value.show = false;
+}
+
 onMounted(() => {
   socket.on('connect', () => {
     isConnected.value = true;
     console.log('Connected to server');
+    showNotification('Connected to server', 'success');
   });
 
   socket.on('disconnect', () => {
     isConnected.value = false;
     console.log('Disconnected from server');
+    showNotification('Disconnected from server', 'error');
   });
 
   socket.on('gameUpdated', (game) => {
     if (currentGame.value && game.id === currentGame.value.id) {
       currentGame.value = game;
+      
+      // Show notifications for game state changes
+      if (game.status === 'completed') {
+        const isWinner = game.winnerId === playerId.value;
+        showNotification(
+          isWinner ? 'You won the game!' : 'You lost the game.', 
+          isWinner ? 'success' : 'info',
+          5000
+        );
+      } else if (game.status === 'draw') {
+        showNotification('Game ended in a draw!', 'info', 5000);
+      }
     }
+  });
+  
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
+    showNotification(error.message || 'An error occurred', 'error');
   });
 });
 </script>
 
 <template>
   <div class="min-h-screen bg-gradient-to-br from-indigo-500 to-purple-600 text-white p-4 md:p-8">
+    <Notification 
+      v-if="notification.show" 
+      :message="notification.message" 
+      :type="notification.type" 
+      :duration="notification.duration" 
+      :show="notification.show"
+      @close="hideNotification"
+    />
     <header class="mb-8 text-center">
       <h1 class="text-4xl font-bold mb-2">Tris Game</h1>
       <p class="text-lg opacity-80">Multiplayer Tic-Tac-Toe</p>

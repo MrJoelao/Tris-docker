@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue';
+import LoadingSpinner from './LoadingSpinner.vue';
 
 const props = defineProps({
   socket: Object,
@@ -112,8 +113,7 @@ function refreshGames() {
     </div>
     
     <div v-if="isLoading" class="text-center py-8">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-      <p class="mt-2">Loading games...</p>
+      <LoadingSpinner message="Loading games..." />
     </div>
     
     <div v-else-if="errorMessage" class="bg-red-500/20 p-4 rounded-lg text-center">
