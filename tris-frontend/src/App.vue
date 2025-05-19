@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue';
 import GameBoard from './components/GameBoard.vue';
 import GameLobby from './components/GameLobby.vue';
 import GameHistory from './components/GameHistory.vue';
+import GameStats from './components/GameStats.vue';
 import Notification from './components/Notification.vue';
 import { io } from 'socket.io-client';
 
@@ -118,6 +119,8 @@ onMounted(() => {
         <div class="card bg-white/10 backdrop-blur-sm rounded-xl p-6 shadow-xl">
           <GameLobby :socket="socket" :player-id="playerId" @start-game="startGame" />
         </div>
+        
+        <GameStats :player-id="playerId" />
         
         <GameHistory :player-id="playerId" />
       </div>
