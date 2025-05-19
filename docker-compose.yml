@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:14
+    container_name: tris-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tris_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:alpine
+    container_name: tris-redis
+    ports:
+      - "6379:6379"
+
+  backend:
+    build:
+      context: ./tris-backend
+      dockerfile: Dockerfile
+    container_name: tris-backend
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=tris_db
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./tris-backend:/app
+      - /app/node_modules
+
+  frontend:
+    build:
+      context: ./tris-frontend
+      dockerfile: Dockerfile
+    container_name: tris-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    volumes:
+      - ./tris-frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
