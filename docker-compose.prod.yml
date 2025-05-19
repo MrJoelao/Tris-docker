@@ -3,13 +3,11 @@ version: '3.8'
 services:
   postgres:
     image: postgres:14
-    container_name: tris-postgres
+    container_name: tris-postgres-prod
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: tris_db
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,26 +15,26 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: always
 
   redis:
     image: redis:alpine
-    container_name: tris-redis
-    ports:
-      - "6379:6379"
+    container_name: tris-redis-prod
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: always
 
   backend:
     build:
       context: ./tris-backend
       dockerfile: Dockerfile
-      target: development
-    container_name: tris-backend
+      target: production
+    container_name: tris-backend-prod
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - DB_HOST=postgres
       - DB_PORT=5432
       - DB_USERNAME=postgres
@@ -51,29 +49,21 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./tris-backend:/app
-      - /app/node_modules
-    restart: unless-stopped
+    restart: always
 
   frontend:
     build:
       context: ./tris-frontend
       dockerfile: Dockerfile
-      target: development
-    container_name: tris-frontend
+      target: production-stage
+    container_name: tris-frontend-prod
     environment:
-      - NODE_ENV=development
-      - VITE_API_URL=http://localhost:3000
-      - VITE_SOCKET_URL=http://localhost:3000
+      - NODE_ENV=production
     ports:
-      - "8080:8080"
+      - "80:80"
     depends_on:
       - backend
-    volumes:
-      - ./tris-frontend:/app
-      - /app/node_modules
-    restart: unless-stopped
+    restart: always
 
 volumes:
   postgres_data:
