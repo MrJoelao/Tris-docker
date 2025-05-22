@@ -5,9 +5,9 @@ echo "Tris Game - Multiplayer Tic-Tac-Toe"
 echo "===================================="
 
 # Check if Docker is installed
-if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null
+if ! command -v docker &> /dev/null || ! docker compose version &> /dev/null
 then
-    echo "Error: Docker and/or Docker Compose not found. Please install them first."
+    echo "Error: Docker and/or Docker Compose plugin not found. Please install Docker and Docker Compose v2."
     exit 1
 fi
 
@@ -41,7 +41,7 @@ start_dev() {
     echo "Setting up Tris Game development environment..."
     setup_env_files
     echo "Starting Docker containers in development mode..."
-    docker-compose -f docker-compose.dev.yml up -d
+    docker compose -f docker-compose.dev.yml up -d
     echo "Development setup complete! The application should be running at:"
     echo "- Frontend: http://localhost:8080"
     echo "- Backend API: http://localhost:3000"
@@ -54,7 +54,7 @@ start_prod() {
     echo "Setting up Tris Game production environment..."
     setup_env_files
     echo "Starting Docker containers in production mode..."
-    docker-compose -f docker-compose.prod.yml up -d
+    docker compose -f docker-compose.prod.yml up -d
     echo "Production setup complete! The application should be running at:"
     echo "- Frontend: http://localhost:80"
     echo "- Backend API: http://localhost:3000"
@@ -65,16 +65,16 @@ start_prod() {
 # Stop all containers
 stop_containers() {
     echo "Stopping all containers..."
-    docker-compose -f docker-compose.dev.yml down
-    docker-compose -f docker-compose.prod.yml down
+    docker compose -f docker-compose.dev.yml down
+    docker compose -f docker-compose.prod.yml down
     echo "All containers stopped."
 }
 
 # Clean up everything
 clean_all() {
     echo "Cleaning up all Docker resources..."
-    docker-compose -f docker-compose.dev.yml down -v
-    docker-compose -f docker-compose.prod.yml down -v
+    docker compose -f docker-compose.dev.yml down -v
+    docker compose -f docker-compose.prod.yml down -v
     echo "Removing Docker images..."
     docker rmi $(docker images -q tris-app_frontend tris-app_backend 2>/dev/null) 2>/dev/null
     echo "Cleanup complete."
